@@ -1,4 +1,4 @@
-dataset_path: "D:/Datasets/news_data/text_summarizer_data.csv"
+dataset_path: ""
 n_epochs: 300
 learning_rate: 0.001
 print_every: 100

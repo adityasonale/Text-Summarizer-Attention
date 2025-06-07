@@ -1,0 +1,13 @@
+dataset_path: "./text_summarizer_data.csv"
+n_epochs: 300
+learning_rate: 0.001
+print_every: 100
+save_dir: "models"
+hidden_size: 256
+batch_size: 32
+
+special_tokens:
+  PAD: 0
+  SOS: 1
+  EOS: 2
+  UNK: 3

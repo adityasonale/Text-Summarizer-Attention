@@ -131,6 +131,7 @@ class EncoderAttention(nn.Module):
         self.positional_embedding = nn.Embedding(max_sen_len, hidden_size)
         self.self_attention = AttentionMasked(hidden_size, masked=False)
         self.dropout = nn.Dropout(p=dropout_p)
+        self.norm = nn.LayerNorm(hidden_size)
 
     def forward(self, x):
         batch_size, seq_len = x.size()
@@ -138,7 +139,13 @@ class EncoderAttention(nn.Module):
         position = torch.arange(seq_len, device=x.device).unsqueeze(0).expand(batch_size, seq_len)
         x = self.token_embedding(x) + self.positional_embedding(position)
         x = self.dropout(x)
-        x, _ = self.self_attention(x)
+
+        # Add residual connection + Layer norm.
+        residual = x
+
+        attn_output, _ = self.self_attention(x)
+
+        x = self.norm(residual + attn_output)
 
         return x # (batch_size, seq_len, embedding_dim)
 
@@ -218,6 +225,9 @@ class DecoderAttention(nn.Module):
         self.output_layer = nn.Linear(hidden_size, output_size)
         self.max_sent_len = max_sen_len
 
+        self.norm_1 = nn.LayerNorm(hidden_size)
+        self.norm_2 = nn.LayerNorm(hidden_size)
+
     def forward(self, encoder_outputs, target_tokens):
         batch_size, seq_len = target_tokens.size()
 
@@ -231,11 +241,19 @@ class DecoderAttention(nn.Module):
 
         x = self.dropout(x)
 
+        residual_1 = x
+
         # 2. Masked Self-Attention (decoder attends to previous positions only)
-        x, _ = self.self_attention(x)
+        self_attention_output, _ = self.self_attention(x)
+
+        x = self.norm_1(self_attention_output + residual_1)
+
+        residual_2 = x
 
         # 3. Cross-Attention (decoder attends to encoder outputs)
-        x, _ = self.cross_attention(x, encoder_outputs)
+        cross_attention_output, _ = self.cross_attention(x, encoder_outputs)
+
+        x = self.norm_2(cross_attention_output + residual_2)
 
         # 4. Project to vocabulary
         x = self.output_layer(x)  # (batch_size, seq_len, vocab_size)

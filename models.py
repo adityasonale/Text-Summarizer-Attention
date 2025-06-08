@@ -142,6 +142,7 @@ class MultiHeadAttention(nn.Module):
         attn_output = torch.matmul(attn_weights, V)
 
         # Concatenate heads
+        # Note: view() requires the underlying tensor to be contiguous. If you try to call view() on a non-contiguous tensor, PyTorch will raise a runtime error.
         attn_output = attn_output.transpose(1, 2).contiguous().view(batch_size, seq_len, self.hidden_size)
 
         # Final output projection

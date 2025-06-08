@@ -96,7 +96,68 @@ class AttentionMasked(nn.Module):
     def create_look_ahead_mask(self, seq_len):
         mask = torch.tril(torch.ones(seq_len, seq_len)).bool()
         return mask
+    
+class MultiHeadAttention(nn.Module):
+    def __init__(self, hidden_size, num_heads=8, masked=False):
+        super().__init__()
+
+        assert hidden_size % num_heads == 0, "hidden_size must be divisible by num_heads"
+
+        self.hidden_size = hidden_size
+        self.num_heads = num_heads
+        self.head_dim = hidden_size // num_heads
+        self.masked = masked
+        self.device = get_device()
+
+        self.query_W = nn.Linear(hidden_size, hidden_size)
+        self.key_W = nn.Linear(hidden_size, hidden_size)
+        self.value_W = nn.Linear(hidden_size, hidden_size)
+
+        # Output layer
+        self.output = nn.Linear(hidden_size, hidden_size)
+
+    def forward(self, query, encoder_hidden_states=None):
+        if encoder_hidden_states is None:
+            encoder_hidden_states = query
+
+        batch_size, seq_len, _ = query.size()
+
+        # Linear projections
+        query = self.query_W(query)
+        key = self.key_W(encoder_hidden_states)
+        value = self.value_W(encoder_hidden_states)
+
+        Q = self.split_heads(query)
+        K = self.split_heads(key)
+        V = self.split_heads(value)
+
+        # Attention scores
+        scores = torch.matmul(Q, K.transpose(-2, -1)) / (self.head_dim ** 0.5)
+
+        if self.masked:
+            mask = self.create_look_ahead_mask(seq_len).to(self.device)
+            scores = scores.masked_fill(mask == 0, float('-inf'))
+
+        attn_weights = F.softmax(scores, dim=-1)
+        attn_output = torch.matmul(attn_weights, V)
+
+        # Concatenate heads
+        attn_output = attn_output.transpose(1, 2).contiguous().view(batch_size, seq_len, self.hidden_size)
+
+        # Final output projection
+        output = self.output(attn_output)
         
+        return output, attn_weights
+
+    def split_heads(self, x):
+        batch_size, seq_len, _ = x.size()
+        return x.view(batch_size, seq_len, self.num_heads, self.head_dim).transpose(1, 2)
+    
+    def create_look_ahead_mask(self, seq_len):
+        # (1, 1, seq_len, seq_len) so it can broadcast across batch and heads
+        return torch.tril(torch.ones((1, 1, seq_len, seq_len), dtype=torch.bool))
+
+
 class Encoder(nn.Module):
     def __init__(self, hidden_size, input_size, n_layers, dropout_p=0.5):
         super(Encoder, self).__init__()
@@ -219,8 +280,8 @@ class DecoderAttention(nn.Module):
         self.positional_embedding = nn.Embedding(max_sen_len, hidden_size)
         self.dropout = nn.Dropout(dropout_p)
 
-        self.self_attention = AttentionMasked(hidden_size, masked=True)
-        self.cross_attention = AttentionMasked(hidden_size, masked=False)
+        self.self_attention = MultiHeadAttention(hidden_size, masked=True)
+        self.cross_attention = MultiHeadAttention(hidden_size, masked=False)
 
         self.output_layer = nn.Linear(hidden_size, output_size)
         self.max_sent_len = max_sen_len
